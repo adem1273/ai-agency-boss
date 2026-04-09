@@ -4,7 +4,7 @@ from typing import List
 from fastapi import FastAPI, Depends, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.core.auth import get_current_user_id, create_access_token
+from core.auth import get_current_user_id, create_access_token
 
 
 def parse_origins(value: str) -> List[str]:
