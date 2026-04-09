@@ -46,3 +46,8 @@ def me(current_user_id: str = Depends(get_current_user_id)):
 
 app.include_router(public)
 app.include_router(protected)
+
+# Phase-2 routes
+from backend.api.routes import router as ai_router
+
+app.include_router(ai_router)
