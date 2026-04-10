@@ -5,3 +5,7 @@ bcrypt==4.2.0
 torch
 transformers
 accelerate
+diffusers
+invisible-watermark
+safetensors
+Pillow
