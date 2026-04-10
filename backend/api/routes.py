@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from backend.core.auth import get_current_user_id
-from backend.services.ai_engine import AIManager
+from core.auth import get_current_user_id
+from services.ai_engine import AIManager
 
 router = APIRouter(prefix="", tags=["ai"])
 
