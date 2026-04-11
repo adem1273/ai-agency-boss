@@ -23,9 +23,11 @@ class ImageManager:
       - SDXL style: a local folder for SDXL weights
     No external APIs are used.
 
-    Env knobs:
-      IMAGE_MODEL_PATH: local model directory
-      IMAGE_MODEL_TYPE: "sd15" | "sdxl"  (default: sd15)
+        Env knobs:
+            IMAGE_MODEL_PATH: local model directory (default: storage/models/sd-turbo)
+            IMAGE_MODEL_ID: HF model id for first-time download (default: stabilityai/sd-turbo)
+            IMAGE_MODEL_TYPE: "sdturbo" | "sd15" | "sdxl"  (default: sdturbo)
+            IMAGE_LOCAL_ONLY: "true" | "false" (default: false)
             IMAGE_ENABLE_DIFFUSERS: "true" | "false" (default: true)
       IMAGE_DEVICE: "auto" | "cuda" | "cpu" (default: auto)
       IMAGE_DTYPE: "auto" | "float16" | "bfloat16" | "float32" (default: auto)
@@ -33,8 +35,10 @@ class ImageManager:
     """
 
     def __init__(self, model_path: Optional[str] = None):
-        self.model_path = model_path or os.getenv("IMAGE_MODEL_PATH", "storage/models/stable-diffusion")
-        self.model_type = os.getenv("IMAGE_MODEL_TYPE", "sd15").lower()
+        self.model_path = model_path or os.getenv("IMAGE_MODEL_PATH", "storage/models/sd-turbo")
+        self.model_id = os.getenv("IMAGE_MODEL_ID", "stabilityai/sd-turbo")
+        self.model_type = os.getenv("IMAGE_MODEL_TYPE", "sdturbo").lower()
+        self.local_only = os.getenv("IMAGE_LOCAL_ONLY", "false").lower() == "true"
         self.enable_diffusers = os.getenv("IMAGE_ENABLE_DIFFUSERS", "true").lower() == "true"
         self.device_pref = os.getenv("IMAGE_DEVICE", "auto").lower()
         self.dtype_pref = os.getenv("IMAGE_DTYPE", "auto").lower()
@@ -71,24 +75,33 @@ class ImageManager:
         if not self.enable_diffusers or not self._diffusers_ready:
             return
 
-        if not Path(self.model_path).exists():
-            return
-
         device = self._resolve_device()
         dtype = self._resolve_dtype(device)
+        model_path_obj = Path(self.model_path)
 
-        # local_files_only=True ensures no downloads / external calls.
+        # Prefer a model directory under storage for persistence across rebuilds.
+        if model_path_obj.exists():
+            model_source = str(model_path_obj)
+            local_files_only = True
+            cache_dir = None
+        else:
+            model_source = self.model_id
+            local_files_only = self.local_only
+            cache_dir = str(self.output_dir.parent / ".hf-cache")
+
         if self.model_type == "sdxl":
             pipe = StableDiffusionXLPipeline.from_pretrained(
-                self.model_path,
-                local_files_only=True,
+                model_source,
+                local_files_only=local_files_only,
                 torch_dtype=dtype,
+                cache_dir=cache_dir,
             )
         else:
             pipe = StableDiffusionPipeline.from_pretrained(
-                self.model_path,
-                local_files_only=True,
+                model_source,
+                local_files_only=local_files_only,
                 torch_dtype=dtype,
+                cache_dir=cache_dir,
             )
 
         # Safety / memory tweaks
@@ -155,10 +168,18 @@ class ImageManager:
             generator = torch.Generator(device=device).manual_seed(int(seed))
 
         # SDXL uses slightly different defaults; keep args compatible.
+        final_steps = int(steps)
+        final_guidance = float(guidance_scale)
+
+        if self.model_type == "sdturbo":
+            # SD-Turbo works best with very low step count and no CFG guidance.
+            final_steps = max(1, min(int(steps), 4))
+            final_guidance = 0.0
+
         common_kwargs = dict(
             prompt=prompt,
-            num_inference_steps=int(steps),
-            guidance_scale=float(guidance_scale),
+            num_inference_steps=final_steps,
+            guidance_scale=final_guidance,
             generator=generator,
         )
         if negative_prompt:

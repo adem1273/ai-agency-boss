@@ -1,89 +1,89 @@
 import json
+import logging
 import os
+from pathlib import Path
 from typing import Any, Dict, Optional
 
-# Local-only Llama-3 inference via Hugging Face Transformers
-# NOTE: This loads models from local disk; no external API calls.
+# Local-only Llama-3 inference via llama-cpp-python and GGUF.
+# NOTE: This loads the model from local disk; no external API calls.
 #
-# Expected model directory:
-#   storage/models/llama3
-#
-# You should place a compatible Llama-3 model there (weights + tokenizer files).
+# Expected GGUF file:
+#   /app/storage/models/Meta-Llama-3-8B-Instruct-Q4_K_M.gguf
 #
 # Environment knobs:
-#   AI_MODEL_PATH: override model path
-#   AI_DEVICE: "cuda" or "cpu" (default: auto)
-#   AI_DTYPE: "auto" | "float16" | "bfloat16" | "float32" (default: auto)
+#   AI_MODEL_PATH: override model file path
+#   AI_N_CTX: context length (default: 4096)
+#   AI_N_THREADS: CPU threads used by llama.cpp (default: cpu_count-1)
+#   AI_N_GPU_LAYERS: GPU layers offloaded (default: 0)
+#   AI_TEMPERATURE: generation temperature (default: 0.7)
+#   AI_TOP_P: nucleus sampling (default: 0.9)
+#   AI_MAX_TOKENS: max generated tokens (default: 700)
 
 try:
-    from transformers import AutoTokenizer, AutoModelForCausalLM
-    import torch
+    from llama_cpp import Llama
 except Exception:
-    AutoTokenizer = None
-    AutoModelForCausalLM = None
-    torch = None
+    Llama = None
+
+
+logger = logging.getLogger(__name__)
 
 
 class AIManager:
     def __init__(self, model_path: Optional[str] = None):
-        self.model_path = model_path or os.getenv("AI_MODEL_PATH", "storage/models/llama3")
-        self.enable_transformers = os.getenv("AI_ENABLE_TRANSFORMERS", "true").lower() == "true"
-        self.device_pref = os.getenv("AI_DEVICE", "auto")
-        self.dtype_pref = os.getenv("AI_DTYPE", "auto")
+        env_model_path = os.getenv("AI_MODEL_PATH", "").strip()
+        self.model_path = model_path or env_model_path or self._resolve_default_model_path()
+        self.enable_local_llm = os.getenv("AI_ENABLE_LOCAL_LLM", "true").lower() == "true"
+        self.n_ctx = int(os.getenv("AI_N_CTX", "4096"))
+        self.n_threads = int(os.getenv("AI_N_THREADS", str(max(1, (os.cpu_count() or 2) - 1))))
+        self.n_gpu_layers = int(os.getenv("AI_N_GPU_LAYERS", "0"))
+        self.temperature = float(os.getenv("AI_TEMPERATURE", "0.7"))
+        self.top_p = float(os.getenv("AI_TOP_P", "0.9"))
+        self.max_tokens = int(os.getenv("AI_MAX_TOKENS", "700"))
 
-        self._tokenizer = None
-        self._model = None
-        self._transformers_ready = bool(
-            torch is not None and AutoTokenizer is not None and AutoModelForCausalLM is not None
-        )
+        self._llm = None
+        self._llama_ready = Llama is not None
 
-    def _resolve_device(self) -> str:
-        if torch is None:
-            return "cpu"
-        if self.device_pref in ("cpu", "cuda"):
-            return self.device_pref
-        return "cuda" if torch.cuda.is_available() else "cpu"
-
-    def _resolve_dtype(self, device: str):
-        if torch is None:
-            return None
-        if self.dtype_pref == "float16":
-            return torch.float16
-        if self.dtype_pref == "bfloat16":
-            return torch.bfloat16
-        if self.dtype_pref == "float32":
-            return torch.float32
-        # auto:
-        if device == "cuda":
-            return torch.float16
-        return torch.float32
+    def _resolve_default_model_path(self) -> str:
+        candidates = [
+            "/app/storage/models/Meta-Llama-3-8B-Instruct-Q4_K_M.gguf",
+            "storage/models/Meta-Llama-3-8B-Instruct-Q4_K_M.gguf",
+        ]
+        for candidate in candidates:
+            if Path(candidate).exists():
+                return str(Path(candidate).resolve())
+        return candidates[0]
 
     def _load(self) -> None:
-        if self._model is not None and self._tokenizer is not None:
+        if self._llm is not None:
             return
 
-        if not self.enable_transformers or not self._transformers_ready:
+        if not self.enable_local_llm or not self._llama_ready:
             return
 
-        if not os.path.exists(self.model_path):
+        model_file = Path(self.model_path).resolve()
+        if not model_file.exists():
+            logger.warning("GGUF model file not found at %s", model_file)
             return
 
-        device = self._resolve_device()
-        dtype = self._resolve_dtype(device)
-
-        self._tokenizer = AutoTokenizer.from_pretrained(self.model_path, local_files_only=True)
-
-        self._model = AutoModelForCausalLM.from_pretrained(
-            self.model_path,
-            local_files_only=True,
-            torch_dtype=dtype,
-            device_map="auto" if device == "cuda" else None,
+        self._llm = Llama(
+            model_path=str(model_file),
+            n_ctx=self.n_ctx,
+            n_threads=self.n_threads,
+            n_gpu_layers=self.n_gpu_layers,
+            verbose=False,
         )
 
-        if device == "cpu":
-            self._model.to("cpu")
+    def _extract_json(self, text: str) -> Dict[str, Any]:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            raise ValueError("Model output did not contain a JSON object.")
 
-        self._model.eval()
+        json_text = text[start : end + 1]
+        try:
+            return json.loads(json_text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid JSON produced by model: {exc}") from exc
 
     def _fallback_strategy(self, business_description: str) -> Dict[str, Any]:
         text = business_description.strip()
@@ -141,7 +141,7 @@ class AIManager:
         """
         self._load()
 
-        if self._model is None or self._tokenizer is None:
+        if self._llm is None:
             return self._fallback_strategy(business_description)
 
         prompt = f"""
@@ -160,32 +160,16 @@ Rules:
 - Do not include markdown.
 """
 
-        inputs = self._tokenizer(prompt, return_tensors="pt")
-        device = self._resolve_device()
-        if device == "cuda":
-            inputs = {k: v.to(self._model.device) for k, v in inputs.items()}
-
-        with torch.no_grad():
-            out = self._model.generate(
-                **inputs,
-                max_new_tokens=600,
-                do_sample=True,
-                temperature=0.7,
-                top_p=0.9,
-                eos_token_id=self._tokenizer.eos_token_id,
-            )
-
-        text = self._tokenizer.decode(out[0], skip_special_tokens=True)
-
-        # Try to extract JSON (model might echo prompt). Take substring from first { to last }.
-        start = text.find("{")
-        end = text.rfind("}")
-        if start == -1 or end == -1 or end <= start:
-            raise ValueError("Model output did not contain a JSON object.")
-
-        json_text = text[start : end + 1]
-
         try:
-            return json.loads(json_text)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON produced by model: {e}") from e
+            out = self._llm(
+                prompt,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+                top_p=self.top_p,
+                stop=["```"],
+            )
+            text = out["choices"][0]["text"]
+            return self._extract_json(text)
+        except Exception as exc:
+            logger.exception("Local llama.cpp generation failed: %s", exc)
+            return self._fallback_strategy(business_description)

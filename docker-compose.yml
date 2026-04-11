@@ -15,10 +15,14 @@ services:
       context: ./backend
     environment:
       DATABASE_URL: postgresql://ai_agency_boss:ai_agency_boss_dev@postgres:5432/ai_agency_boss
-      JWT_SECRET: change-me
+      JWT_SECRET: "super-secret-key-123"
       JWT_ALGORITHM: HS256
       JWT_EXPIRES_MINUTES: "60"
       CORS_ORIGINS: http://localhost:3000
+      IMAGE_MODEL_TYPE: sdturbo
+      IMAGE_MODEL_PATH: /app/storage/models/sd-turbo
+      IMAGE_MODEL_ID: stabilityai/sd-turbo
+      IMAGE_LOCAL_ONLY: "false"
     ports:
       - "8000:8000"
     depends_on:

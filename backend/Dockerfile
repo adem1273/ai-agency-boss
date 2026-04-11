@@ -4,6 +4,7 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    gcc g++ make cmake pkg-config \
     libxcb1 libxcb-render0 libxcb-shape0 libxcb-xfixes0 \
     && rm -rf /var/lib/apt/lists/*
 
