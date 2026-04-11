@@ -3,8 +3,15 @@ import time
 from pathlib import Path
 from typing import Optional
 
-import torch
-from diffusers import StableDiffusionPipeline, StableDiffusionXLPipeline
+from PIL import Image, ImageDraw, ImageFont
+
+try:
+    import torch
+    from diffusers import StableDiffusionPipeline, StableDiffusionXLPipeline
+except Exception:
+    torch = None
+    StableDiffusionPipeline = None
+    StableDiffusionXLPipeline = None
 
 
 class ImageManager:
@@ -19,6 +26,7 @@ class ImageManager:
     Env knobs:
       IMAGE_MODEL_PATH: local model directory
       IMAGE_MODEL_TYPE: "sd15" | "sdxl"  (default: sd15)
+            IMAGE_ENABLE_DIFFUSERS: "true" | "false" (default: true)
       IMAGE_DEVICE: "auto" | "cuda" | "cpu" (default: auto)
       IMAGE_DTYPE: "auto" | "float16" | "bfloat16" | "float32" (default: auto)
       IMAGE_OUTPUT_DIR: output directory (default: storage/outputs)
@@ -27,18 +35,24 @@ class ImageManager:
     def __init__(self, model_path: Optional[str] = None):
         self.model_path = model_path or os.getenv("IMAGE_MODEL_PATH", "storage/models/stable-diffusion")
         self.model_type = os.getenv("IMAGE_MODEL_TYPE", "sd15").lower()
+        self.enable_diffusers = os.getenv("IMAGE_ENABLE_DIFFUSERS", "true").lower() == "true"
         self.device_pref = os.getenv("IMAGE_DEVICE", "auto").lower()
         self.dtype_pref = os.getenv("IMAGE_DTYPE", "auto").lower()
         self.output_dir = Path(os.getenv("IMAGE_OUTPUT_DIR", "storage/outputs"))
 
         self._pipe = None
+        self._diffusers_ready = bool(torch is not None and StableDiffusionPipeline is not None)
 
     def _resolve_device(self) -> str:
+        if torch is None:
+            return "cpu"
         if self.device_pref in ("cpu", "cuda"):
             return self.device_pref
         return "cuda" if torch.cuda.is_available() else "cpu"
 
     def _resolve_dtype(self, device: str):
+        if torch is None:
+            return None
         if self.dtype_pref == "float16":
             return torch.float16
         if self.dtype_pref == "bfloat16":
@@ -52,6 +66,12 @@ class ImageManager:
 
     def _load(self) -> None:
         if self._pipe is not None:
+            return
+
+        if not self.enable_diffusers or not self._diffusers_ready:
+            return
+
+        if not Path(self.model_path).exists():
             return
 
         device = self._resolve_device()
@@ -83,6 +103,26 @@ class ImageManager:
 
         self._pipe = pipe
 
+    def _render_fallback(self, prompt: str, width: int, height: int, out_path: Path) -> None:
+        # Lightweight fallback image for environments without local model or heavy ML deps.
+        image = Image.new("RGB", (width, height), color=(24, 28, 36))
+        draw = ImageDraw.Draw(image)
+
+        for y in range(height):
+            shade = int(24 + (y / max(height, 1)) * 60)
+            draw.line([(0, y), (width, y)], fill=(shade, shade + 8, shade + 16))
+
+        title = "Generated (Fallback)"
+        max_chars = 120
+        text = prompt[:max_chars] + ("..." if len(prompt) > max_chars else "")
+        font = ImageFont.load_default()
+
+        draw.rectangle([(16, 16), (width - 16, 100)], fill=(0, 0, 0, 120))
+        draw.text((24, 24), title, fill=(255, 255, 255), font=font)
+        draw.text((24, 52), text, fill=(220, 230, 245), font=font)
+
+        image.save(out_path)
+
     def generate_image(
         self,
         prompt: str,
@@ -100,6 +140,14 @@ class ImageManager:
         """
         self._load()
         self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        ts = int(time.time())
+        fname = f"img_{ts}.png"
+        out_path = self.output_dir / fname
+
+        if self._pipe is None:
+            self._render_fallback(prompt=prompt, width=int(width), height=int(height), out_path=out_path)
+            return str(out_path)
 
         generator = None
         if seed is not None:
@@ -127,10 +175,6 @@ class ImageManager:
         result = self._pipe(**common_kwargs)
         image = result.images[0]
 
-        ts = int(time.time())
-        safe_ts = str(ts)
-        fname = f"img_{safe_ts}.png"
-        out_path = self.output_dir / fname
         image.save(out_path)
 
         return str(out_path)

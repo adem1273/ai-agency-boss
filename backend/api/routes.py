@@ -26,8 +26,10 @@ def analyze(
 # --- Phase-3: Stable Diffusion image generation ---
 from pydantic import BaseModel, Field
 from services.image_engine import ImageManager
+from services.video_engine import VideoConcatenator
 
 _image_manager = ImageManager()
+_video_concatenator = VideoConcatenator()
 
 
 class GenerateImageRequest(BaseModel):
@@ -67,3 +69,30 @@ def generate_image(
 
     output_url = f"/files/{relative_path.lstrip('/')}"
     return {"user_id": current_user_id, "output_path": path, "output_url": output_url}
+
+
+class ConcatVideoRequest(BaseModel):
+    input_paths: list[str] = Field(..., min_length=2)
+    output_name: str = Field("merged.mp4", min_length=1, max_length=255)
+    reencode: bool = True
+
+
+@router.post("/concat-video")
+def concat_video(
+    body: ConcatVideoRequest,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    output_dir = Path("storage/outputs") / current_user_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / body.output_name
+
+    input_videos = [Path(p) for p in body.input_paths]
+    _video_concatenator.render(input_videos=input_videos, output_path=output_path, reencode=body.reencode)
+
+    output_url = f"/files/outputs/{current_user_id}/{output_path.name}"
+    return {
+        "user_id": current_user_id,
+        "output_path": str(output_path),
+        "output_url": output_url,
+        "input_count": len(input_videos),
+    }

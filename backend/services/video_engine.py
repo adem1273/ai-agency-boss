@@ -52,9 +52,9 @@ class VideoConcatenator:
                 cmd.extend(["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac", "-b:a", "192k"])
             else:
                 cmd.extend(["-c", "copy"])
-            cmd.append(str(output_path))
+            cmd.append(str(output_path.resolve()))
 
-            self._run(cmd, cwd=output_path.parent)
+            self._run(cmd)
         finally:
             if list_file_path and list_file_path.exists():
                 list_file_path.unlink()
