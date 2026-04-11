@@ -17,6 +17,21 @@ function getApiBaseUrl() { return process.env.NEXT_PUBLIC_API_BASE_URL || "http:
 function getToken()      { if (typeof window === "undefined") return ""; return localStorage.getItem("jwt") || ""; }
 function setToken(t: string) { if (typeof window !== "undefined") localStorage.setItem("jwt", t); }
 
+function buildAuthHeaders(rawToken: string): HeadersInit {
+  const token = rawToken.trim().replace(/^Bearer\s+/i, "");
+  if (!token) {
+    throw new Error("JWT token gerekli.");
+  }
+  // JWT ASCII/base64url karakterleri ile gelmelidir.
+  if (!/^[A-Za-z0-9._-]+$/.test(token)) {
+    throw new Error("Token formati gecersiz. Sadece gecerli JWT degeri kullanin.");
+  }
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${token}`,
+  };
+}
+
 // ── Static data ──────────────────────────────────────────
 const FEATURES = [
   {
@@ -70,7 +85,7 @@ export default function DashboardPage() {
     try {
       const res = await fetch(`${apiBase}/analyze`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
+        headers: buildAuthHeaders(jwt),
         body: JSON.stringify({ business_description: businessDescription }),
       });
       if (!res.ok) throw new Error(`Analyze failed (${res.status}): ${await res.text()}`);
@@ -85,7 +100,7 @@ export default function DashboardPage() {
     try {
       const res = await fetch(`${apiBase}/generate-image`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
+        headers: buildAuthHeaders(jwt),
         body: JSON.stringify({ prompt, width: 512, height: 512, steps: 30, guidance_scale: 7.0 }),
       });
       if (!res.ok) throw new Error(`Generate-image failed (${res.status}): ${await res.text()}`);
