@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
+from pathlib import Path
 
 from core.auth import get_current_user_id
 from services.ai_engine import AIManager
@@ -24,7 +25,7 @@ def analyze(
 
 # --- Phase-3: Stable Diffusion image generation ---
 from pydantic import BaseModel, Field
-from backend.services.image_engine import ImageManager
+from services.image_engine import ImageManager
 
 _image_manager = ImageManager()
 
@@ -55,4 +56,14 @@ def generate_image(
         seed=body.seed,
         negative_prompt=body.negative_prompt,
     )
-    return {"user_id": current_user_id, "output_path": path}
+    output_path = Path(path)
+    output_posix = output_path.as_posix()
+    if "/storage/" in output_posix:
+        relative_path = output_posix.split("/storage/", 1)[1]
+    elif output_posix.startswith("storage/"):
+        relative_path = output_posix[len("storage/") :]
+    else:
+        relative_path = output_path.name
+
+    output_url = f"/files/{relative_path.lstrip('/')}"
+    return {"user_id": current_user_id, "output_path": path, "output_url": output_url}

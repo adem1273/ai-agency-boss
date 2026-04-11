@@ -16,6 +16,12 @@ type AnalyzeResponse = {
 type GenerateImageResponse = {
   user_id: string;
   output_path: string;
+  output_url: string;
+};
+
+type GeneratedImage = {
+  path: string;
+  url: string;
 };
 
 function getApiBaseUrl() {
@@ -44,7 +50,7 @@ export default function DashboardPage() {
   const [loadingImage, setLoadingImage] = useState(false);
 
   const [report, setReport] = useState<StrategyReport | null>(null);
-  const [images, setImages] = useState<string[]>([]);
+  const [images, setImages] = useState<GeneratedImage[]>([]);
   const [error, setError] = useState<string>("");
 
   useEffect(() => {
@@ -103,10 +109,8 @@ export default function DashboardPage() {
       }
 
       const data = (await res.json()) as GenerateImageResponse;
-
-      // Backend returns a filesystem path; for now we display it as text.
-      // Next step: expose storage/outputs via a static route (e.g., /files/...) so images can be shown as <img>.
-      setImages((prev) => [data.output_path, ...prev]);
+      const imageUrl = `${apiBase}${data.output_url}`;
+      setImages((prev) => [{ path: data.output_path, url: imageUrl }, ...prev]);
     } catch (e: any) {
       setError(e?.message || "Generate-image error");
     } finally {
@@ -225,7 +229,7 @@ export default function DashboardPage() {
         <div className="mt-6">
           <h3 className="text-white font-semibold">Galeri</h3>
           <p className="mt-1 text-sm text-white/60">
-            Şimdilik backend bir dosya yolu döndürüyor. Bir sonraki adımda bu klasörü statik olarak servis edip görselleri burada gerçek <code className="text-white/80">img</code> olarak göstereceğiz.
+            Uretilen gorseller backend uzerinden servis edilip burada onizlenir.
           </p>
 
           {images.length === 0 ? (
@@ -234,10 +238,16 @@ export default function DashboardPage() {
             </div>
           ) : (
             <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-              {images.map((p, idx) => (
+              {images.map((img, idx) => (
                 <div key={idx} className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                  <div className="text-xs text-white/60">Output path</div>
-                  <div className="mt-1 text-sm text-white/90 break-all">{p}</div>
+                  <img
+                    src={img.url}
+                    alt={`Generated ${idx + 1}`}
+                    className="h-auto w-full rounded-xl border border-white/10 bg-black/30"
+                    loading="lazy"
+                  />
+                  <div className="mt-2 text-xs text-white/60">Output path</div>
+                  <div className="mt-1 text-xs text-white/80 break-all">{img.path}</div>
                 </div>
               ))}
             </div>

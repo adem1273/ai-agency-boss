@@ -3,6 +3,7 @@ from typing import List
 
 from fastapi import FastAPI, Depends, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from core.auth import get_current_user_id, create_access_token
 
@@ -51,3 +52,6 @@ app.include_router(protected)
 from api.routes import router as ai_router
 
 app.include_router(ai_router)
+
+# Expose local storage for generated files (e.g. /files/outputs/<file>.png)
+app.mount("/files", StaticFiles(directory="storage"), name="files")
