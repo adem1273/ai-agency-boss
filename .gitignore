@@ -3,3 +3,11 @@
 node_modules/
 frontend/node_modules/
 storage/models/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env
